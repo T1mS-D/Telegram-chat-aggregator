@@ -1,14 +1,13 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
-
 from app.config import VK_GROUP_TOKEN, VK_GROUP_ID
 from app.db.database import AsyncSessionLocal
 from app.db.crud import create_message, get_all_subscriptions
 from app.services.ai_search import is_relevant
+from app.services.embeddings import is_similar
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +31,18 @@ async def _process(vk, text: str, from_id: int, peer_id: int, link: str):
         await session.commit()
 
     for sub in subscriptions:
+        try:
+            similar = is_similar(text, sub.prompt)
+        except Exception as e:
+            logger.error(f"[EMBEDDINGS] sub {sub.id} error: {e}")
+            similar = True  # при ошибке пропускаем на LLM
+
+        if not similar:
+            logger.debug(f"[FILTER] sub {sub.id} rejected by embeddings, skipping LLM")
+            continue
+
+        logger.debug(f"[FILTER] sub {sub.id} passed embeddings, sending to LLM")
+
         try:
             matched = await is_relevant(text, sub.prompt)
         except Exception as e:
@@ -73,8 +84,7 @@ def run_longpoll(loop: asyncio.AbstractEventLoop):
             logger.info(f"[WALL_POST] from={from_id}: {text[:60]}")
 
             future = asyncio.run_coroutine_threadsafe(
-                _process(vk, text, from_id, -VK_GROUP_ID, link),
-                loop,
+                _process(vk, text, from_id, -VK_GROUP_ID, link), loop
             )
             try:
                 future.result(timeout=30)
@@ -91,8 +101,7 @@ def run_longpoll(loop: asyncio.AbstractEventLoop):
             logger.info(f"[WALL_COMMENT] from={from_id} on post {post_id}: {text[:60]}")
 
             future = asyncio.run_coroutine_threadsafe(
-                _process(vk, text, from_id, -VK_GROUP_ID, link),
-                loop,
+                _process(vk, text, from_id, -VK_GROUP_ID, link), loop
             )
             try:
                 future.result(timeout=30)

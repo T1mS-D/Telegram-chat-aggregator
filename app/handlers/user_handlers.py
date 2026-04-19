@@ -1,9 +1,10 @@
 import logging
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-
 from app.db.database import AsyncSessionLocal
 from app.db.crud import (
     get_or_create_user,
+    get_user_state,
+    set_user_state,
     create_subscription,
     get_subscriptions_by_user,
     get_subscription,
@@ -11,9 +12,6 @@ from app.db.crud import (
 )
 
 logger = logging.getLogger(__name__)
-
-user_states: dict[int, str | None] = {}
-
 
 def make_main_keyboard() -> str:
     kb = VkKeyboard(one_time=False)
@@ -30,27 +28,25 @@ async def handle_message(vk, user_id: int, text: str):
 
     async with AsyncSessionLocal() as session:
         await get_or_create_user(session, user_id)
+        state = await get_user_state(session, user_id)
         await session.commit()
 
-    state = user_states.get(user_id)
-
     if state == "subscribe":
-        user_states[user_id] = None
         if not text_stripped:
             _send(vk, user_id, "Промпт не может быть пустым. Попробуй ещё раз.",
                   keyboard=make_main_keyboard())
             return
         async with AsyncSessionLocal() as session:
+            await set_user_state(session, user_id, None)
             sub = await create_subscription(session, user_id, text_stripped)
             await session.commit()
         _send(vk, user_id,
               f"✅ Подписка #{sub.id} создана:\n{sub.prompt}\n\n"
-              "Буду уведомлять тебя при совпадении в беседах сообщества.",
+              "Буду уведомлять тебя при совпадении на стене сообщества.",
               keyboard=make_main_keyboard())
         return
 
     if state == "delete":
-        user_states[user_id] = None
         num = text_stripped.replace("#", "").strip()
         if not num.isdigit():
             _send(vk, user_id, "Введи номер подписки цифрой. Например: 3",
@@ -58,8 +54,10 @@ async def handle_message(vk, user_id: int, text: str):
             return
         sub_id = int(num)
         async with AsyncSessionLocal() as session:
+            await set_user_state(session, user_id, None)
             sub = await get_subscription(session, sub_id, user_id)
             if not sub:
+                await session.commit()
                 _send(vk, user_id, f"Подписка #{sub_id} не найдена.",
                       keyboard=make_main_keyboard())
                 return
@@ -71,9 +69,8 @@ async def handle_message(vk, user_id: int, text: str):
 
     if text_lower in ("начать", "start", "привет", ""):
         _send(vk, user_id,
-              "Я агрегатор VK-бесед.\n\n"
-              "когда появляется что-то по твоей теме.\n\n"
-              "Используй кнопки ниже",
+              "👋 Привет! Я агрегатор VK-сообщества.\n\n"
+              "Используй кнопки ниже 👇",
               keyboard=make_main_keyboard())
 
     elif text_lower in ("📋 мои подписки", "список", "мои подписки"):
@@ -88,7 +85,9 @@ async def handle_message(vk, user_id: int, text: str):
                   keyboard=make_main_keyboard())
 
     elif text_lower in ("➕ подписаться", "подписаться"):
-        user_states[user_id] = "subscribe"
+        async with AsyncSessionLocal() as session:
+            await set_user_state(session, user_id, "subscribe")
+            await session.commit()
         _send(vk, user_id,
               "Напиши тему для отслеживания.\n"
               "Например: жалобы клиентов, упоминание сроков, недовольство сервисом",
@@ -101,7 +100,9 @@ async def handle_message(vk, user_id: int, text: str):
             _send(vk, user_id, "Нет подписок для удаления.", keyboard=make_main_keyboard())
         else:
             lines = [f"#{s.id}: {s.prompt}" for s in subs]
-            user_states[user_id] = "delete"
+            async with AsyncSessionLocal() as session:
+                await set_user_state(session, user_id, "delete")
+                await session.commit()
             _send(vk, user_id,
                   "Напиши номер подписки для удаления:\n\n" + "\n".join(lines),
                   keyboard=make_main_keyboard())

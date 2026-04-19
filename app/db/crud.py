@@ -1,7 +1,6 @@
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
-
 from app.db.models import User, Subscription, Message
 
 async def get_or_create_user(
@@ -17,6 +16,15 @@ async def get_or_create_user(
         await session.flush()
     return user
 
+
+async def get_user_state(session: AsyncSession, user_id: int) -> str | None:
+    user = await session.get(User, user_id)
+    return user.state if user else None
+
+async def set_user_state(session: AsyncSession, user_id: int, state: str | None) -> None:
+    user = await session.get(User, user_id)
+    if user:
+        user.state = state
 
 async def create_subscription(session: AsyncSession, user_id: int, prompt: str) -> Subscription:
     sub = Subscription(user_id=user_id, prompt=prompt)
@@ -50,7 +58,6 @@ async def delete_subscription(session: AsyncSession, sub_id: int) -> None:
 async def get_all_subscriptions(session: AsyncSession) -> list[Subscription]:
     result = await session.execute(select(Subscription))
     return result.scalars().all()
-
 
 async def create_message(
     session: AsyncSession,

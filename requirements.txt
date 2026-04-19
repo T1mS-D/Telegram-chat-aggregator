@@ -5,3 +5,5 @@ python-dotenv
 psycopg2-binary
 aiohttp
 httpx
+alembic
+scikit-learn
