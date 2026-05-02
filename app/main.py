@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import logging.handlers
 import threading
+import os
 
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
@@ -9,10 +11,26 @@ from app.config import VK_GROUP_TOKEN, VK_GROUP_ID
 from app.handlers.user_handlers import handle_message
 from app.services.vk_listener import run_longpoll
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+
+def setup_logging():
+    os.makedirs("logs", exist_ok=True)
+
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        "logs/app.log", maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    file_handler.setFormatter(fmt)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(console)
+    root.addHandler(file_handler)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +65,7 @@ def run_dm_listener(loop: asyncio.AbstractEventLoop):
 
 
 async def main():
+    setup_logging()
     loop = asyncio.get_running_loop()
 
     t1 = threading.Thread(target=run_longpoll, args=(loop,), daemon=True)

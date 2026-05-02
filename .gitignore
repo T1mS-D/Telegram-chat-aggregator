@@ -19,3 +19,4 @@ env/
 Thumbs.db
 *.log
 alembic/versions/*.pyc
+logs/
